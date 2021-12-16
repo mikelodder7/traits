@@ -42,14 +42,13 @@ pub trait StreamCipherCore: BlockSizeUser + Sized {
                 chunk.xor2out(tmp);
                 post_fn(chunk.get_out());
             }
-            if blocks.is_empty() {
-                return;
+            if !blocks.is_empty() {
+                let n = blocks.len();
+                let tmp = &mut tmp[..n];
+                proc.stream_proc(tmp);
+                blocks.xor2out(tmp);
+                post_fn(blocks.get_out());
             }
-            let n = blocks.len();
-            let tmp = &mut tmp[..n];
-            proc.stream_proc(tmp);
-            blocks.xor2out(tmp);
-            post_fn(blocks.get_out());
         });
     }
 
@@ -65,10 +64,9 @@ pub trait StreamCipherCore: BlockSizeUser + Sized {
                 blocks = tail;
                 proc.stream_proc(chunk);
             }
-            if blocks.is_empty() {
-                return;
+            if !blocks.is_empty() {
+                proc.stream_proc(blocks);
             }
-            proc.stream_proc(blocks);
         });
     }
 

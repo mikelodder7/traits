@@ -118,7 +118,9 @@ pub trait BlockEncrypt: BlockSizeUser + Sized {
                 blocks = tail;
                 proc.par_proc(chunk);
             }
-            proc.par_proc(blocks);
+            if !blocks.is_empty() {
+                proc.par_proc(blocks);
+            }
         });
     }
 
@@ -188,7 +190,9 @@ pub trait BlockDecrypt: BlockSizeUser + Sized {
                 blocks = tail;
                 proc.par_proc(chunk);
             }
-            proc.par_proc(blocks);
+            if !blocks.is_empty() {
+                proc.par_proc(blocks);
+            }
         });
     }
 
@@ -262,7 +266,9 @@ pub trait BlockEncryptMut: BlockSizeUser + Sized {
                 blocks = tail;
                 proc.par_proc_mut(chunk);
             }
-            proc.par_proc_mut(blocks);
+            if !blocks.is_empty() {
+                proc.par_proc_mut(blocks);
+            }
         });
     }
 
@@ -336,7 +342,9 @@ pub trait BlockDecryptMut: BlockSizeUser + Sized {
                 blocks = tail;
                 proc.par_proc_mut(chunk);
             }
-            proc.par_proc_mut(blocks);
+            if !blocks.is_empty() {
+                proc.par_proc_mut(blocks);
+            }
         });
     }
 
