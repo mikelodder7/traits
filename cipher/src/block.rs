@@ -24,21 +24,21 @@ pub trait BlockEncrypt: BlockSizeUser {
     fn encrypt_block_inout(&self, block: InOut<'_, Block<Self>>);
 
     /// Encrypt `blocks` with `gen_in` and `body` hooks.
-    fn encrypt_blocks_with_gen<B: ChunkProc<Block<Self>>>(
-        &self,
-        blocks: B,
-        gen_in: impl FnMut(&mut [Block<Self>]) -> InCtrl,
-        body: impl FnMut(B, &mut [Block<Self>]),
+    fn encrypt_with_callback(
+        f: impl FnOnce(
+            &mut [Block<Self>],
+            fn(&Self, InOutBuf<'_, Block<Self>>),
+        ),
     ) {
-        blocks.process_chunks::<U1, _, _, _, _, _>(
-            self,
-            gen_in,
-            body,
-            |state, mut chunk| state.encrypt_block_inout(chunk.get(0)),
-            |_, _| unreachable!(),
-        )
+        f(
+            &mut [Default::default(); 1],
+            |s, blocks| {
+                assert_eq!(blocks.len(), 1);
+                BlockEncrypt::encrypt_block_inout(s, blocks.get(0));
+            },
+        );
     }
-
+/*
     /// Encrypt `blocks` with callback hooks.
     fn encrypt_blocks_with_hook<B: ChunkProc<Block<Self>>>(
         &self,
@@ -88,6 +88,7 @@ pub trait BlockEncrypt: BlockSizeUser {
         });
         Ok(())
     }
+*/
 }
 
 /// Decrypt-only functionality for block ciphers.
@@ -96,21 +97,21 @@ pub trait BlockDecrypt: BlockSizeUser {
     fn decrypt_block_inout(&self, block: InOut<'_, Block<Self>>);
 
     /// Decrypt `blocks` with `gen_in` and `body` hooks.
-    fn decrypt_blocks_with_gen<B: ChunkProc<Block<Self>>>(
-        &self,
-        blocks: B,
-        gen_in: impl FnMut(&mut [Block<Self>]) -> InCtrl,
-        body: impl FnMut(B, &mut [Block<Self>]),
+    fn decrypt_with_callback(
+        f: impl FnOnce(
+            &mut [Block<Self>],
+            fn(&Self, InOutBuf<'_, Block<Self>>),
+        ),
     ) {
-        blocks.process_chunks::<U1, _, _, _, _, _>(
-            self,
-            gen_in,
-            body,
-            |state, mut chunk| state.decrypt_block_inout(chunk.get(0)),
-            |_, _| unreachable!(),
-        )
+        f(
+            &mut [Default::default(); 1],
+            |s, blocks| {
+                assert_eq!(blocks.len(), 1);
+                BlockDecrypt::decrypt_block_inout(s, blocks.get(0));
+            },
+        );
     }
-
+/*
     /// Decrypt `blocks` with callback hooks.
     fn decrypt_blocks_with_hook<B: ChunkProc<Block<Self>>>(
         &self,
@@ -160,6 +161,7 @@ pub trait BlockDecrypt: BlockSizeUser {
         });
         Ok(())
     }
+*/
 }
 
 /// Decrypt-only functionality for block ciphers and modes with mutable access to `self`.
@@ -172,21 +174,21 @@ pub trait BlockEncryptMut: BlockSizeUser {
     fn encrypt_block_inout_mut(&mut self, block: InOut<'_, Block<Self>>);
 
     /// Encrypt `blocks` with `gen_in` and `body` hooks.
-    fn encrypt_blocks_with_gen_mut<B: ChunkProc<Block<Self>>>(
-        &mut self,
-        blocks: B,
-        gen_in: impl FnMut(&mut [Block<Self>]) -> InCtrl,
-        body: impl FnMut(B, &mut [Block<Self>]),
+    fn encrypt_with_callback_mut(
+        f: impl FnOnce(
+            &mut [Block<Self>],
+            fn(&mut Self, InOutBuf<'_, Block<Self>>),
+        ),
     ) {
-        blocks.process_chunks::<U1, _, _, _, _, _>(
-            self,
-            gen_in,
-            body,
-            |state, mut chunk| state.encrypt_block_inout_mut(chunk.get(0)),
-            |_, _| unreachable!(),
-        )
+        f(
+            &mut [Default::default(); 1],
+            |s, blocks| {
+                assert_eq!(blocks.len(), 1);
+                BlockEncryptMut::encrypt_block_inout_mut(s, blocks.get(0));
+            },
+        );
     }
-
+/*
     /// Encrypt `blocks` with callback hooks.
     fn encrypt_blocks_with_hook_mut<B: ChunkProc<Block<Self>>>(
         &mut self,
@@ -238,6 +240,7 @@ pub trait BlockEncryptMut: BlockSizeUser {
         });
         Ok(())
     }
+*/
 }
 
 /// Decrypt-only functionality for block ciphers and modes with mutable access to `self`.
@@ -250,21 +253,21 @@ pub trait BlockDecryptMut: BlockSizeUser {
     fn decrypt_block_inout_mut(&mut self, block: InOut<'_, Block<Self>>);
 
     /// Decrypt `blocks` with `gen_in` and `body` hooks.
-    fn decrypt_blocks_with_gen_mut<B: ChunkProc<Block<Self>>>(
-        &mut self,
-        blocks: B,
-        gen_in: impl FnMut(&mut [Block<Self>]) -> InCtrl,
-        body: impl FnMut(B, &mut [Block<Self>]),
+    fn decrypt_with_callback_mut(
+        f: impl FnOnce(
+            &mut [Block<Self>],
+            fn(&mut Self, InOutBuf<'_, Block<Self>>),
+        ),
     ) {
-        blocks.process_chunks::<U1, _, _, _, _, _>(
-            self,
-            gen_in,
-            body,
-            |state, mut chunk| state.decrypt_block_inout_mut(chunk.get(0)),
-            |_, _| unreachable!(),
-        )
+        f(
+            &mut [Default::default(); 1],
+            |s, blocks| {
+                assert_eq!(blocks.len(), 1);
+                BlockDecryptMut::decrypt_block_inout_mut(s, blocks.get(0));
+            },
+        );
     }
-
+/*
     /// Decrypt `blocks` with callback hooks.
     fn decrypt_blocks_with_hook_mut<B: ChunkProc<Block<Self>>>(
         &mut self,
@@ -316,21 +319,26 @@ pub trait BlockDecryptMut: BlockSizeUser {
         });
         Ok(())
     }
+*/
 }
-
+/*
 impl<Alg: BlockEncrypt> BlockEncryptMut for Alg {
     #[inline]
     fn encrypt_block_inout_mut(&mut self, block: InOut<'_, Block<Self>>) {
         self.encrypt_block_inout(block)
     }
 
-    fn encrypt_blocks_with_gen_mut<B: ChunkProc<Block<Self>>>(
+    fn encrypt_with_callback_mut(
         &mut self,
-        blocks: B,
-        gen_in: impl FnMut(&mut [Block<Self>]) -> InCtrl,
-        body: impl FnMut(B, &mut [Block<Self>]),
+        f: impl FnOnce(
+            &mut Self,
+            &mut [Block<Self>],
+            fn(&mut Self, InOutBuf<'_, Block<Self>>),
+        ),
     ) {
-        self.encrypt_blocks_with_gen(blocks, gen_in, body);
+        Alg::encrypt_with_callback(self, |s, t, enc| {
+            f(&mut s, t, unsafe { core::mem::transmute(enc) });
+        });
     }
 }
 
@@ -340,15 +348,18 @@ impl<Alg: BlockDecrypt> BlockDecryptMut for Alg {
         self.decrypt_block_inout(block)
     }
 
-    fn decrypt_blocks_with_gen_mut<B: ChunkProc<Block<Self>>>(
+    fn decrypt_with_callback_mut(
         &mut self,
-        blocks: B,
-        gen_in: impl FnMut(&mut [Block<Self>]) -> InCtrl,
-        body: impl FnMut(B, &mut [Block<Self>]),
+        f: impl FnOnce(
+            &mut Self,
+            &mut [Block<Self>],
+            fn(&mut Self, InOutBuf<'_, Block<Self>>),
+        ),
     ) {
-        self.decrypt_blocks_with_gen(blocks, gen_in, body);
+        
     }
 }
+*/
 
 impl<Alg: BlockEncrypt> BlockEncrypt for &Alg {
     #[inline]
@@ -356,13 +367,15 @@ impl<Alg: BlockEncrypt> BlockEncrypt for &Alg {
         Alg::encrypt_block_inout(self, block);
     }
 
-    fn encrypt_blocks_with_gen<B: ChunkProc<Block<Self>>>(
-        &self,
-        blocks: B,
-        gen_in: impl FnMut(&mut [Block<Self>]) -> InCtrl,
-        body: impl FnMut(B, &mut [Block<Self>]),
+    fn encrypt_with_callback(
+        f: impl FnOnce(
+            &mut [Block<Self>],
+            fn(&Self, InOutBuf<'_, Block<Self>>),
+        ),
     ) {
-        Alg::encrypt_blocks_with_gen(self, blocks, gen_in, body);
+        Alg::encrypt_with_callback(|t, enc| {
+            f(t, |_, _| {});
+        });
     }
 }
 
@@ -372,13 +385,13 @@ impl<Alg: BlockDecrypt> BlockDecrypt for &Alg {
         Alg::decrypt_block_inout(self, block);
     }
 
-    fn decrypt_blocks_with_gen<B: ChunkProc<Block<Self>>>(
-        &self,
-        blocks: B,
-        gen_in: impl FnMut(&mut [Block<Self>]) -> InCtrl,
-        body: impl FnMut(B, &mut [Block<Self>]),
+    fn decrypt_with_callback(
+        f: impl FnOnce(
+            &mut [Block<Self>],
+            fn(&Self, InOutBuf<'_, Block<Self>>),
+        ),
     ) {
-        Alg::decrypt_blocks_with_gen(self, blocks, gen_in, body);
+        // Alg::decrypt_with_callback(self, f);
     }
 }
 
