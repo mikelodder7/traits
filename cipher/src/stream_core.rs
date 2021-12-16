@@ -1,8 +1,12 @@
 use crate::StreamCipherError;
 use core::convert::{TryFrom, TryInto};
 use crypto_common::{Block, BlockSizeUser};
-use generic_array::{typenum::Unsigned, ArrayLength, GenericArray};
-use inout::{ChunkProc, InOutBuf};
+use generic_array::typenum::Unsigned;
+use inout::InOutBuf;
+
+pub trait StreamProc: BlockSizeUser {
+    fn stream_proc(&mut self, blocks: &mut [Block<Self>]);
+}
 
 /// Block-level synchronous stream ciphers.
 pub trait StreamCipherCore: BlockSizeUser + Sized {
@@ -13,13 +17,12 @@ pub trait StreamCipherCore: BlockSizeUser + Sized {
     /// to fit into `usize`.
     fn remaining_blocks(&self) -> Option<usize>;
 
-    /// Process `blocks` with generated keystream blocks.
-    ///
-    /// WARNING: this method does not check number of remaining blocks!
-    fn process_with_keystream_blocks<B: ChunkProc<Block<Self>>>(
+    fn gen_keystream_with_callback(
         &mut self,
-        blocks: B,
-        body: impl FnMut(B, &mut [Block<Self>]),
+        f: impl FnOnce(
+            &mut [Block<Self>],
+            &mut dyn StreamProc<BlockSize = Self::BlockSize>,
+        ),
     );
 
     /// Apply keystream blocks with post hook.
@@ -27,24 +30,45 @@ pub trait StreamCipherCore: BlockSizeUser + Sized {
     /// WARNING: this method does not check number of remaining blocks!
     fn apply_keystream_blocks(
         &mut self,
-        blocks: InOutBuf<'_, Block<Self>>,
+        mut blocks: InOutBuf<'_, Block<Self>>,
         mut post_fn: impl FnMut(&[Block<Self>]),
     ) {
-        self.process_with_keystream_blocks(blocks, |mut chunk, keystream| {
-            apply_ks(chunk.reborrow(), keystream);
-            post_fn(chunk.get_out());
+        self.gen_keystream_with_callback(|tmp, proc| {
+            let chunk_len = tmp.len();
+            while blocks.len() >= chunk_len {
+                let (mut chunk, tail) = blocks.split_at(chunk_len);
+                blocks = tail;
+                proc.stream_proc(tmp);
+                chunk.xor2out(tmp);
+                post_fn(chunk.get_out());
+            }
+            if blocks.is_empty() {
+                return;
+            }
+            let n = blocks.len();
+            let tmp = &mut tmp[..n];
+            proc.stream_proc(tmp);
+            blocks.xor2out(tmp);
+            post_fn(blocks.get_out());
         });
     }
 
     /// Write keystream blocks to `buf`.
     ///
     /// WARNING: this method does not check number of remaining blocks!
-    fn write_keystream_blocks(&mut self, buf: &mut [Block<Self>]) {
-        self.process_with_keystream_blocks(buf, |chunk, keystream| {
-            assert_eq!(chunk.len(), keystream.len());
-            for (a, b) in chunk.iter_mut().zip(keystream.iter()) {
-                a.copy_from_slice(b);
+    fn write_keystream_blocks(&mut self, blocks: &mut [Block<Self>]) {
+        self.gen_keystream_with_callback(|tmp, proc| {
+            let mut blocks = blocks;
+            let chunk_len = tmp.len();
+            while blocks.len() >= chunk_len {
+                let (chunk, tail) = blocks.split_at_mut(chunk_len);
+                blocks = tail;
+                proc.stream_proc(chunk);
             }
+            if blocks.is_empty() {
+                return;
+            }
+            proc.stream_proc(blocks);
         });
     }
 
@@ -143,25 +167,3 @@ macro_rules! impl_counter {
 }
 
 impl_counter! { u32 u64 u128 }
-
-type B<N> = GenericArray<u8, N>;
-
-fn apply_ks<N: ArrayLength<u8>>(blocks: InOutBuf<'_, B<N>>, ks: &[B<N>]) {
-    use core::ptr;
-
-    assert_eq!(blocks.len(), ks.len());
-    let n = blocks.len();
-    unsafe {
-        let (in_ptr, out_ptr) = blocks.into_raw();
-        let ks_ptr = ks.as_ptr();
-        for i in 0..n {
-            let a = ptr::read(in_ptr.add(i));
-            let b = ptr::read(ks_ptr.add(i));
-            let mut res = GenericArray::<u8, N>::default();
-            for j in 0..N::USIZE {
-                res[j] = a[j] ^ b[j];
-            }
-            ptr::write(out_ptr.add(i), res);
-        }
-    }
-}

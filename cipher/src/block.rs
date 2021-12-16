@@ -10,42 +10,89 @@
 //! [2]: https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation
 //! [3]: https://en.wikipedia.org/wiki/Symmetric-key_algorithm
 
-use generic_array::typenum::U1;
-use inout::{ChunkProc, InCtrl, InOut, InOutBuf, NotEqualError};
+use generic_array::ArrayLength;
+use inout::{InOut, InOutBuf, NotEqualError};
 
 pub use crypto_common::{Block, BlockSizeUser};
 
 /// Marker trait for block ciphers.
 pub trait BlockCipher: BlockSizeUser {}
 
+pub trait ParProc: BlockSizeUser {
+    fn par_proc(&self, blocks: InOutBuf<'_, Block<Self>>);
+}
+
+pub trait ParProcMut: BlockSizeUser {
+    fn par_proc_mut(&mut self, blocks: InOutBuf<'_, Block<Self>>);
+}
+
+impl<B: ArrayLength<u8>> BlockSizeUser for &dyn ParProc<BlockSize = B> {
+    type BlockSize = B;
+}
+
+impl<B: ArrayLength<u8>> ParProcMut for &dyn ParProc<BlockSize = B> {
+    #[inline(always)]
+    fn par_proc_mut(&mut self, blocks: InOutBuf<'_, Block<Self>>) {
+        self.par_proc(blocks);
+    }
+}
+
+struct DummyParProc<'a, T: BlockSizeUser> {
+    state: &'a T,
+    proc: fn(&T, InOut<'_, Block<T>>)
+}
+
+impl<'a, T: BlockSizeUser> BlockSizeUser for DummyParProc<'a, T> {
+    type BlockSize = T::BlockSize;
+}
+
+impl<'a, T: BlockSizeUser> ParProc for DummyParProc<'a, T> {
+    #[inline(always)]
+    fn par_proc(&self, mut blocks: InOutBuf<'_, Block<Self>>) {
+        assert_eq!(blocks.len(), 1);
+        let Self { state, proc } = self;
+        proc(state, blocks.get(0));
+    }
+}
+
+struct DummyParProcMut<'a, T: BlockSizeUser> {
+    state: &'a mut T,
+    proc: fn(&mut T, InOut<'_, Block<T>>)
+}
+
+impl<'a, T: BlockSizeUser> BlockSizeUser for DummyParProcMut<'a, T> {
+    type BlockSize = T::BlockSize;
+}
+
+impl<'a, T: BlockSizeUser> ParProcMut for DummyParProcMut<'a, T> {
+    #[inline(always)]
+    fn par_proc_mut(&mut self, mut blocks: InOutBuf<'_, Block<Self>>) {
+        assert_eq!(blocks.len(), 1);
+        let Self { state, proc } = self;
+        proc(state, blocks.get(0));
+    }
+}
+
 /// Encrypt-only functionality for block ciphers.
-pub trait BlockEncrypt: BlockSizeUser {
+pub trait BlockEncrypt: BlockSizeUser + Sized {
     /// Encrypt single `inout` block.
     fn encrypt_block_inout(&self, block: InOut<'_, Block<Self>>);
 
     /// Encrypt `blocks` with `gen_in` and `body` hooks.
     fn encrypt_with_callback(
+        &self,
         f: impl FnOnce(
             &mut [Block<Self>],
-            fn(&Self, InOutBuf<'_, Block<Self>>),
+            &dyn ParProc<BlockSize = Self::BlockSize>,
         ),
     ) {
         f(
             &mut [Default::default(); 1],
-            |s, blocks| {
-                assert_eq!(blocks.len(), 1);
-                BlockEncrypt::encrypt_block_inout(s, blocks.get(0));
+            &DummyParProc {
+                state: self,
+                proc: Self::encrypt_block_inout,
             },
         );
-    }
-/*
-    /// Encrypt `blocks` with callback hooks.
-    fn encrypt_blocks_with_hook<B: ChunkProc<Block<Self>>>(
-        &self,
-        blocks: B,
-        body: impl FnMut(B, &mut [Block<Self>]),
-    ) {
-        self.encrypt_blocks_with_gen(blocks, |_| InCtrl::In, body);
     }
 
     /// Encrypt single block in-place.
@@ -61,19 +108,27 @@ pub trait BlockEncrypt: BlockSizeUser {
         self.encrypt_block_inout((in_block, out_block).into())
     }
 
+    /// Encrypt `inout` blocks.
+    #[inline]
+    fn encrypt_blocks_inout(&self, mut blocks: InOutBuf<'_, Block<Self>>) {
+        self.encrypt_with_callback(|tmp, proc| {
+            let chunk_len = tmp.len();
+            while blocks.len() >= chunk_len {
+                let (chunk, tail) = blocks.split_at(chunk_len);
+                blocks = tail;
+                proc.par_proc(chunk);
+            }
+            proc.par_proc(blocks);
+        });
+    }
+
     /// Encrypt blocks in-place.
     #[inline]
     fn encrypt_blocks(&self, blocks: &mut [Block<Self>]) {
-        self.encrypt_blocks_with_hook(blocks, |chunk, res| chunk.clone_from_slice(res));
+        self.encrypt_blocks_inout(blocks.into());
     }
 
-    /// Encrypt `inout` blocks with given post hook.
-    #[inline]
-    fn encrypt_blocks_inout(&self, blocks: InOutBuf<'_, Block<Self>>) {
-        self.encrypt_blocks_with_hook(blocks, |chunk, res| chunk.get_out().clone_from_slice(res));
-    }
-
-    /// Encrypt blocks buffer-to-buffer with given post hook.
+    /// Encrypt blocks buffer-to-buffer.
     ///
     /// Returns [`NotEqualError`] if provided `in_blocks` and `out_blocks`
     /// have different lengths.
@@ -83,42 +138,31 @@ pub trait BlockEncrypt: BlockSizeUser {
         in_blocks: &[Block<Self>],
         out_blocks: &mut [Block<Self>],
     ) -> Result<(), NotEqualError> {
-        self.encrypt_blocks_with_hook(InOutBuf::new(in_blocks, out_blocks)?, |chunk, res| {
-            chunk.get_out().clone_from_slice(res)
-        });
-        Ok(())
+        InOutBuf::new(in_blocks, out_blocks)
+            .map(|blocks| self.encrypt_blocks_inout(blocks))
     }
-*/
 }
 
 /// Decrypt-only functionality for block ciphers.
-pub trait BlockDecrypt: BlockSizeUser {
+pub trait BlockDecrypt: BlockSizeUser + Sized {
     /// Decrypt single `inout` block.
     fn decrypt_block_inout(&self, block: InOut<'_, Block<Self>>);
 
     /// Decrypt `blocks` with `gen_in` and `body` hooks.
     fn decrypt_with_callback(
+        &self,
         f: impl FnOnce(
             &mut [Block<Self>],
-            fn(&Self, InOutBuf<'_, Block<Self>>),
+            &dyn ParProc<BlockSize = Self::BlockSize>,
         ),
     ) {
         f(
             &mut [Default::default(); 1],
-            |s, blocks| {
-                assert_eq!(blocks.len(), 1);
-                BlockDecrypt::decrypt_block_inout(s, blocks.get(0));
+            &DummyParProc {
+                state: self,
+                proc: Self::decrypt_block_inout,
             },
         );
-    }
-/*
-    /// Decrypt `blocks` with callback hooks.
-    fn decrypt_blocks_with_hook<B: ChunkProc<Block<Self>>>(
-        &self,
-        blocks: B,
-        body: impl FnMut(B, &mut [Block<Self>]),
-    ) {
-        self.decrypt_blocks_with_gen(blocks, |_| InCtrl::In, body);
     }
 
     /// Decrypt single block in-place.
@@ -134,19 +178,27 @@ pub trait BlockDecrypt: BlockSizeUser {
         self.decrypt_block_inout((in_block, out_block).into())
     }
 
+    /// Decrypt `inout` blocks.
+    #[inline]
+    fn decrypt_blocks_inout(&self, mut blocks: InOutBuf<'_, Block<Self>>) {
+        self.decrypt_with_callback(|tmp, proc| {
+            let chunk_len = tmp.len();
+            while blocks.len() >= chunk_len {
+                let (chunk, tail) = blocks.split_at(chunk_len);
+                blocks = tail;
+                proc.par_proc(chunk);
+            }
+            proc.par_proc(blocks);
+        });
+    }
+
     /// Decrypt blocks in-place.
     #[inline]
     fn decrypt_blocks(&self, blocks: &mut [Block<Self>]) {
-        self.decrypt_blocks_with_hook(blocks, |chunk, res| chunk.clone_from_slice(res));
+        self.decrypt_blocks_inout(blocks.into());
     }
 
-    /// Decrypt `inout` blocks with given post hook.
-    #[inline]
-    fn decrypt_blocks_inout(&self, blocks: InOutBuf<'_, Block<Self>>) {
-        self.decrypt_blocks_with_hook(blocks, |chunk, res| chunk.get_out().clone_from_slice(res));
-    }
-
-    /// Decrypt blocks buffer-to-buffer with given post hook.
+    /// Decrypt blocks buffer-to-buffer.
     ///
     /// Returns [`NotEqualError`] if provided `in_blocks` and `out_blocks`
     /// have different lengths.
@@ -156,12 +208,9 @@ pub trait BlockDecrypt: BlockSizeUser {
         in_blocks: &[Block<Self>],
         out_blocks: &mut [Block<Self>],
     ) -> Result<(), NotEqualError> {
-        self.decrypt_blocks_with_hook(InOutBuf::new(in_blocks, out_blocks)?, |chunk, res| {
-            chunk.get_out().clone_from_slice(res)
-        });
-        Ok(())
+        InOutBuf::new(in_blocks, out_blocks)
+            .map(|blocks| self.decrypt_blocks_inout(blocks))
     }
-*/
 }
 
 /// Decrypt-only functionality for block ciphers and modes with mutable access to `self`.
@@ -169,33 +218,25 @@ pub trait BlockDecrypt: BlockSizeUser {
 /// The main use case for this trait is blocks modes, but it also can be used
 /// for hardware cryptographic engines which require `&mut self` access to an
 /// underlying hardware peripheral.
-pub trait BlockEncryptMut: BlockSizeUser {
+pub trait BlockEncryptMut: BlockSizeUser + Sized {
     /// Encrypt single `inout` block.
     fn encrypt_block_inout_mut(&mut self, block: InOut<'_, Block<Self>>);
 
     /// Encrypt `blocks` with `gen_in` and `body` hooks.
     fn encrypt_with_callback_mut(
+        &mut self,
         f: impl FnOnce(
             &mut [Block<Self>],
-            fn(&mut Self, InOutBuf<'_, Block<Self>>),
+            &mut dyn ParProcMut<BlockSize = Self::BlockSize>,
         ),
     ) {
         f(
             &mut [Default::default(); 1],
-            |s, blocks| {
-                assert_eq!(blocks.len(), 1);
-                BlockEncryptMut::encrypt_block_inout_mut(s, blocks.get(0));
+            &mut DummyParProcMut {
+                state: self,
+                proc: Self::encrypt_block_inout_mut,
             },
         );
-    }
-/*
-    /// Encrypt `blocks` with callback hooks.
-    fn encrypt_blocks_with_hook_mut<B: ChunkProc<Block<Self>>>(
-        &mut self,
-        blocks: B,
-        body: impl FnMut(B, &mut [Block<Self>]),
-    ) {
-        self.encrypt_blocks_with_gen_mut(blocks, |_| InCtrl::In, body);
     }
 
     /// Encrypt single block in-place.
@@ -211,21 +252,27 @@ pub trait BlockEncryptMut: BlockSizeUser {
         self.encrypt_block_inout_mut((in_block, out_block).into())
     }
 
-    /// Encrypt blocks in-place.
+    /// Encrypt `inout` blocks.
     #[inline]
-    fn encrypt_blocks_mut(&mut self, blocks: &mut [Block<Self>]) {
-        self.encrypt_blocks_with_hook_mut(blocks, |chunk, res| chunk.clone_from_slice(res));
-    }
-
-    /// Encrypt `inout` blocks with given post hook.
-    #[inline]
-    fn encrypt_blocks_inout_mut(&mut self, blocks: InOutBuf<'_, Block<Self>>) {
-        self.encrypt_blocks_with_hook_mut(blocks, |chunk, res| {
-            chunk.get_out().clone_from_slice(res)
+    fn encrypt_blocks_inout_mut(&mut self, mut blocks: InOutBuf<'_, Block<Self>>) {
+        self.encrypt_with_callback_mut(|tmp, proc| {
+            let chunk_len = tmp.len();
+            while blocks.len() >= chunk_len {
+                let (chunk, tail) = blocks.split_at(chunk_len);
+                blocks = tail;
+                proc.par_proc_mut(chunk);
+            }
+            proc.par_proc_mut(blocks);
         });
     }
 
-    /// Encrypt blocks buffer-to-buffer with given post hook.
+    /// Encrypt blocks in-place.
+    #[inline]
+    fn encrypt_blocks_mut(&mut self, blocks: &mut [Block<Self>]) {
+        self.encrypt_blocks_inout_mut(blocks.into());
+    }
+
+    /// Encrypt blocks buffer-to-buffer.
     ///
     /// Returns [`NotEqualError`] if provided `in_blocks` and `out_blocks`
     /// have different lengths.
@@ -235,12 +282,9 @@ pub trait BlockEncryptMut: BlockSizeUser {
         in_blocks: &[Block<Self>],
         out_blocks: &mut [Block<Self>],
     ) -> Result<(), NotEqualError> {
-        self.encrypt_blocks_with_hook_mut(InOutBuf::new(in_blocks, out_blocks)?, |chunk, res| {
-            chunk.get_out().clone_from_slice(res)
-        });
-        Ok(())
+        InOutBuf::new(in_blocks, out_blocks)
+            .map(|blocks| self.encrypt_blocks_inout_mut(blocks))
     }
-*/
 }
 
 /// Decrypt-only functionality for block ciphers and modes with mutable access to `self`.
@@ -248,33 +292,25 @@ pub trait BlockEncryptMut: BlockSizeUser {
 /// The main use case for this trait is blocks modes, but it also can be used
 /// for hardware cryptographic engines which require `&mut self` access to an
 /// underlying hardware peripheral.
-pub trait BlockDecryptMut: BlockSizeUser {
+pub trait BlockDecryptMut: BlockSizeUser + Sized {
     /// Decrypt single `inout` block.
     fn decrypt_block_inout_mut(&mut self, block: InOut<'_, Block<Self>>);
 
     /// Decrypt `blocks` with `gen_in` and `body` hooks.
     fn decrypt_with_callback_mut(
+        &mut self,
         f: impl FnOnce(
             &mut [Block<Self>],
-            fn(&mut Self, InOutBuf<'_, Block<Self>>),
+            &mut dyn ParProcMut<BlockSize = Self::BlockSize>,
         ),
     ) {
         f(
             &mut [Default::default(); 1],
-            |s, blocks| {
-                assert_eq!(blocks.len(), 1);
-                BlockDecryptMut::decrypt_block_inout_mut(s, blocks.get(0));
+            &mut DummyParProcMut {
+                state: self,
+                proc: Self::decrypt_block_inout_mut,
             },
         );
-    }
-/*
-    /// Decrypt `blocks` with callback hooks.
-    fn decrypt_blocks_with_hook_mut<B: ChunkProc<Block<Self>>>(
-        &mut self,
-        blocks: B,
-        body: impl FnMut(B, &mut [Block<Self>]),
-    ) {
-        self.decrypt_blocks_with_gen_mut(blocks, |_| InCtrl::In, body);
     }
 
     /// Decrypt single block in-place.
@@ -290,21 +326,27 @@ pub trait BlockDecryptMut: BlockSizeUser {
         self.decrypt_block_inout_mut((in_block, out_block).into())
     }
 
-    /// Decrypt blocks in-place.
+    /// Decrypt `inout` blocks.
     #[inline]
-    fn decrypt_blocks_mut(&mut self, blocks: &mut [Block<Self>]) {
-        self.decrypt_blocks_with_hook_mut(blocks, |chunk, res| chunk.clone_from_slice(res));
-    }
-
-    /// Decrypt `inout` blocks with given post hook.
-    #[inline]
-    fn decrypt_blocks_inout_mut(&mut self, blocks: InOutBuf<'_, Block<Self>>) {
-        self.decrypt_blocks_with_hook_mut(blocks, |chunk, res| {
-            chunk.get_out().clone_from_slice(res)
+    fn decrypt_blocks_inout_mut(&mut self, mut blocks: InOutBuf<'_, Block<Self>>) {
+        self.decrypt_with_callback_mut(|tmp, proc| {
+            let chunk_len = tmp.len();
+            while blocks.len() >= chunk_len {
+                let (chunk, tail) = blocks.split_at(chunk_len);
+                blocks = tail;
+                proc.par_proc_mut(chunk);
+            }
+            proc.par_proc_mut(blocks);
         });
     }
 
-    /// Decrypt blocks buffer-to-buffer with given post hook.
+    /// Decrypt blocks in-place.
+    #[inline]
+    fn decrypt_blocks_mut(&mut self, blocks: &mut [Block<Self>]) {
+        self.decrypt_blocks_inout_mut(blocks.into());
+    }
+
+    /// Decrypt blocks buffer-to-buffer.
     ///
     /// Returns [`NotEqualError`] if provided `in_blocks` and `out_blocks`
     /// have different lengths.
@@ -314,16 +356,13 @@ pub trait BlockDecryptMut: BlockSizeUser {
         in_blocks: &[Block<Self>],
         out_blocks: &mut [Block<Self>],
     ) -> Result<(), NotEqualError> {
-        self.decrypt_blocks_with_hook_mut(InOutBuf::new(in_blocks, out_blocks)?, |chunk, res| {
-            chunk.get_out().clone_from_slice(res)
-        });
-        Ok(())
+        InOutBuf::new(in_blocks, out_blocks)
+            .map(|blocks| self.decrypt_blocks_inout_mut(blocks))
     }
-*/
 }
-/*
+
 impl<Alg: BlockEncrypt> BlockEncryptMut for Alg {
-    #[inline]
+    #[inline(always)]
     fn encrypt_block_inout_mut(&mut self, block: InOut<'_, Block<Self>>) {
         self.encrypt_block_inout(block)
     }
@@ -331,19 +370,16 @@ impl<Alg: BlockEncrypt> BlockEncryptMut for Alg {
     fn encrypt_with_callback_mut(
         &mut self,
         f: impl FnOnce(
-            &mut Self,
             &mut [Block<Self>],
-            fn(&mut Self, InOutBuf<'_, Block<Self>>),
+            &mut dyn ParProcMut<BlockSize = Self::BlockSize>,
         ),
     ) {
-        Alg::encrypt_with_callback(self, |s, t, enc| {
-            f(&mut s, t, unsafe { core::mem::transmute(enc) });
-        });
+        Alg::encrypt_with_callback(self, |t, mut proc| f(t, &mut proc));
     }
 }
 
 impl<Alg: BlockDecrypt> BlockDecryptMut for Alg {
-    #[inline]
+    #[inline(always)]
     fn decrypt_block_inout_mut(&mut self, block: InOut<'_, Block<Self>>) {
         self.decrypt_block_inout(block)
     }
@@ -351,47 +387,45 @@ impl<Alg: BlockDecrypt> BlockDecryptMut for Alg {
     fn decrypt_with_callback_mut(
         &mut self,
         f: impl FnOnce(
-            &mut Self,
             &mut [Block<Self>],
-            fn(&mut Self, InOutBuf<'_, Block<Self>>),
+            &mut dyn ParProcMut<BlockSize = Self::BlockSize>,
         ),
     ) {
-        
+        Alg::decrypt_with_callback(self, |t, mut proc| f(t, &mut proc));
     }
 }
-*/
 
 impl<Alg: BlockEncrypt> BlockEncrypt for &Alg {
-    #[inline]
+    #[inline(always)]
     fn encrypt_block_inout(&self, block: InOut<'_, Block<Self>>) {
         Alg::encrypt_block_inout(self, block);
     }
 
     fn encrypt_with_callback(
+        &self,
         f: impl FnOnce(
             &mut [Block<Self>],
-            fn(&Self, InOutBuf<'_, Block<Self>>),
+            &dyn ParProc<BlockSize = Self::BlockSize>,
         ),
     ) {
-        Alg::encrypt_with_callback(|t, enc| {
-            f(t, |_, _| {});
-        });
+        Alg::encrypt_with_callback(self, f);
     }
 }
 
 impl<Alg: BlockDecrypt> BlockDecrypt for &Alg {
-    #[inline]
+    #[inline(always)]
     fn decrypt_block_inout(&self, block: InOut<'_, Block<Self>>) {
         Alg::decrypt_block_inout(self, block);
     }
 
     fn decrypt_with_callback(
+        &self,
         f: impl FnOnce(
             &mut [Block<Self>],
-            fn(&Self, InOutBuf<'_, Block<Self>>),
+            &dyn ParProc<BlockSize = Self::BlockSize>,
         ),
     ) {
-        // Alg::decrypt_with_callback(self, f);
+        Alg::decrypt_with_callback(self, f);
     }
 }
 
