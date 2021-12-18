@@ -115,12 +115,11 @@ where
         }
 
         let (blocks, mut leftover) = data.into_chunks();
-        self.core.apply_keystream_blocks(blocks, |_| {});
+        self.core.apply_keystream_blocks(blocks);
 
         let n = leftover.len();
         if n != 0 {
-            self.core
-                .write_keystream_blocks(slice::from_mut(&mut self.buffer));
+            self.core.write_keystream_block(&mut self.buffer);
             leftover.xor(&self.buffer[..n]);
         }
         self.set_pos_unchecked(n);
@@ -163,8 +162,7 @@ where
 
         let n = tail.len();
         if n != 0 {
-            self.core
-                .write_keystream_blocks(slice::from_mut(&mut self.buffer));
+            self.core.write_keystream_block(&mut self.buffer);
             tail.copy_from_slice(&self.buffer[..n]);
         }
         self.set_pos_unchecked(n);
@@ -187,10 +185,7 @@ where
         let (block_pos, byte_pos) = new_pos.into_block_byte(T::BlockSize::U8)?;
         core.set_block_pos(block_pos);
         if byte_pos != 0 {
-            let mut block = Default::default();
-            let buf = InOutBuf::from_mut(&mut block);
-            core.apply_keystream_blocks(buf, |_| {});
-            *buffer = block;
+            core.write_keystream_block(buffer);
         }
         *pos = byte_pos;
         Ok(())

@@ -12,28 +12,48 @@ use inout::{InOutBuf, NotEqualError};
 pub trait AsyncStreamCipher: BlockEncryptMut + BlockDecryptMut + Sized {
     /// Encrypt data using `InOutBuf`.
     fn encrypt_inout(mut self, data: InOutBuf<'_, u8>) {
-        let (blocks, mut tail) = data.into_chunks();
-        self.encrypt_blocks_inout_mut(blocks);
-        let mut block = Block::<Self>::default();
-        let n = tail.len();
-        if n != 0 {
-            block[..n].copy_from_slice(tail.reborrow().get_in());
-            self.encrypt_block_mut(&mut block);
-            tail.get_out().copy_from_slice(&block[..n]);
-        }
+        self.callback_encrypt_mut(|tmp, enc, par_enc| {
+            let (mut blocks, mut tail) = data.into_chunks();
+            let chunk_len = tmp.len();
+            while blocks.len() >= chunk_len {
+                let (chunk, tail) = blocks.split_at(chunk_len);
+                blocks = tail;
+                par_enc(chunk);
+            }
+            for block in blocks {
+                enc(block);
+            }
+            let n = tail.len();
+            if n != 0 {
+                let mut block = Block::<Self>::default();
+                block[..n].copy_from_slice(tail.reborrow().get_in());
+                enc((&mut block).into());
+                tail.get_out().copy_from_slice(&block[..n]);
+            }
+        });
     }
 
     /// Decrypt data using `InOutBuf`.
     fn decrypt_inout(mut self, data: InOutBuf<'_, u8>) {
-        let (blocks, mut tail) = data.into_chunks();
-        self.decrypt_blocks_inout_mut(blocks);
-        let mut block = Block::<Self>::default();
-        let n = tail.len();
-        if n != 0 {
-            block[..n].copy_from_slice(tail.reborrow().get_in());
-            self.decrypt_block_mut(&mut block);
-            tail.get_out().copy_from_slice(&block[..n]);
-        }
+        self.callback_decrypt_mut(|tmp, dec, par_dec| {
+            let (mut blocks, mut tail) = data.into_chunks();
+            let chunk_len = tmp.len();
+            while blocks.len() >= chunk_len {
+                let (chunk, tail) = blocks.split_at(chunk_len);
+                blocks = tail;
+                par_dec(chunk);
+            }
+            for block in blocks {
+                dec(block);
+            }
+            let n = tail.len();
+            if n != 0 {
+                let mut block = Block::<Self>::default();
+                block[..n].copy_from_slice(tail.reborrow().get_in());
+                dec((&mut block).into());
+                tail.get_out().copy_from_slice(&block[..n]);
+            }
+        });
     }
 
     /// Encrypt data in place.

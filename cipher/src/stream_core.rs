@@ -4,10 +4,6 @@ use crypto_common::{Block, BlockSizeUser};
 use generic_array::typenum::Unsigned;
 use inout::InOutBuf;
 
-pub trait StreamProc: BlockSizeUser {
-    fn stream_proc(&mut self, blocks: &mut [Block<Self>]);
-}
-
 /// Block-level synchronous stream ciphers.
 pub trait StreamCipherCore: BlockSizeUser + Sized {
     /// Return number of remaining blocks before cipher wraps around.
@@ -17,63 +13,59 @@ pub trait StreamCipherCore: BlockSizeUser + Sized {
     /// to fit into `usize`.
     fn remaining_blocks(&self) -> Option<usize>;
 
-    fn gen_keystream_with_callback(
+    fn callback_gen_keystream(
         &mut self,
         f: impl FnOnce(
             &mut [Block<Self>],
-            &mut dyn StreamProc<BlockSize = Self::BlockSize>,
+            &mut dyn FnMut(&mut Block<Self>),
+            &mut dyn FnMut(&mut [Block<Self>]),
         ),
     );
 
-    /// Apply keystream blocks with post hook.
+    /// Generate and apply keystream blocks by XORing them with blocks from
+    /// the input buffer and write result to the output buffer.
     ///
     /// WARNING: this method does not check number of remaining blocks!
-    fn apply_keystream_blocks(
-        &mut self,
-        mut blocks: InOutBuf<'_, Block<Self>>,
-        mut post_fn: impl FnMut(&[Block<Self>]),
-    ) {
-        self.gen_keystream_with_callback(|tmp, proc| {
+    fn apply_keystream_blocks(&mut self, mut blocks: InOutBuf<'_, Block<Self>>) {
+        self.callback_gen_keystream(|tmp, gen_block, gen_blocks| {
             let chunk_len = tmp.len();
             while blocks.len() >= chunk_len {
+                gen_blocks(tmp);
                 let (mut chunk, tail) = blocks.split_at(chunk_len);
                 blocks = tail;
-                proc.stream_proc(tmp);
                 chunk.xor2out(tmp);
-                post_fn(chunk.get_out());
             }
-            if !blocks.is_empty() {
-                let n = blocks.len();
-                let tmp = &mut tmp[..n];
-                proc.stream_proc(tmp);
-                blocks.xor2out(tmp);
-                post_fn(blocks.get_out());
+            for mut block in blocks {
+                let mut t = Default::default();
+                gen_block(&mut t);
+                block.xor2out(&t);
             }
         });
     }
 
-    /// Write keystream blocks to `buf`.
+    /// Generate and write keystream blocks to `blocks`.
     ///
     /// WARNING: this method does not check number of remaining blocks!
     fn write_keystream_blocks(&mut self, blocks: &mut [Block<Self>]) {
-        self.gen_keystream_with_callback(|tmp, proc| {
-            let mut blocks = blocks;
+        self.callback_gen_keystream(|tmp, gen_block, gen_blocks| {
             let chunk_len = tmp.len();
-            while blocks.len() >= chunk_len {
-                let (chunk, tail) = blocks.split_at_mut(chunk_len);
-                blocks = tail;
-                proc.stream_proc(chunk);
-            }
-            if !blocks.is_empty() {
-                proc.stream_proc(blocks);
-            }
+            let mut iter = blocks.chunks_exact_mut(chunk_len);
+            (&mut iter).for_each(gen_blocks);
+            iter.into_remainder().iter_mut().for_each(gen_block);
         });
     }
 
-    /// Try to apply keystream to data not divided into blocks.
+    /// Generate and write single keystream block to `block`.
     ///
-    /// Consumes cipher since it may consume final keystream block only
-    /// partially.
+    /// WARNING: this method does not check number of remaining blocks!
+    fn write_keystream_block(&mut self, block: &mut Block<Self>) {
+        self.callback_gen_keystream(|_, gen_block, _| gen_block(block));
+    }
+
+    /// Try to generate and apply keystream to data not divided into blocks.
+    ///
+    /// Consumes cipher since it this method consume final keystream block
+    /// only partially.
     ///
     /// Returns an error if number of remaining blocks is not sufficient
     /// for processing the input data.
@@ -94,7 +86,7 @@ pub trait StreamCipherCore: BlockSizeUser + Sized {
 
         if buf.len() > Self::BlockSize::USIZE {
             let (blocks, tail) = buf.into_chunks();
-            self.apply_keystream_blocks(blocks, |_| {});
+            self.apply_keystream_blocks(blocks);
             buf = tail;
         }
         let n = buf.len();
@@ -104,15 +96,15 @@ pub trait StreamCipherCore: BlockSizeUser + Sized {
         let mut block = Block::<Self>::default();
         block[..n].copy_from_slice(buf.reborrow().get_in());
         let mut t = InOutBuf::from_mut(&mut block);
-        self.apply_keystream_blocks(t.reborrow(), |_| {});
+        self.apply_keystream_blocks(t.reborrow());
         buf.get_out().copy_from_slice(&block[..n]);
         Ok(())
     }
 
-    /// Try to apply keystream to data not divided into blocks.
+    /// Generate and apply keystream to data not divided into blocks.
     ///
-    /// Consumes cipher since it may consume final keystream block only
-    /// partially.
+    /// Consumes cipher since it this method consume final keystream block
+    /// only partially.
     ///
     /// # Panics
     /// If number of remaining blocks is not sufficient for processing the

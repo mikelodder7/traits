@@ -34,12 +34,10 @@ mod stream;
 mod stream_core;
 mod stream_wrapper;
 
-pub use crate::{
-    block::*, errors::*,
-    stream_core::*, stream::*, stream_wrapper::*
-};
+pub use crate::{block::*, errors::*, stream::*, stream_core::*, stream_wrapper::*};
 pub use crypto_common::{
-    Block, InnerIvInit, InvalidLength, Iv, IvSizeUser, Key, KeyInit, KeyIvInit, KeySizeUser,
+    Block, BlockSizeUser, InnerIvInit, InvalidLength, Iv, IvSizeUser, Key, KeyInit, KeyIvInit,
+    KeySizeUser,
 };
 pub use generic_array::{self, typenum::consts};
 
