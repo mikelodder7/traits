@@ -10,7 +10,7 @@
 //! [2]: https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation
 //! [3]: https://en.wikipedia.org/wiki/Symmetric-key_algorithm
 use crypto_common::{Block, BlockSizeUser};
-use inout::{InOutBuf, NotEqualError};
+use inout::{InOut, InOutBuf, NotEqualError};
 
 /// Marker trait for block ciphers.
 pub trait BlockCipher: BlockSizeUser {}
@@ -21,26 +21,26 @@ pub trait BlockEncrypt: BlockSizeUser + Sized {
         &self,
         f: impl FnOnce(&mut [Block<Self>], &dyn Fn(InOutBuf<'_, Block<Self>>)),
     );
-    /*
-        /// Encrypt single `inout` block.
-        #[inline(always)]
-        fn encrypt_block_inout(&self, block: InOut<'_, Block<Self>>) {
-            self.callback_encrypt(|_, enc| enc(block));
-        }
 
-        /// Encrypt single block in-place.
-        #[inline(always)]
-        fn encrypt_block(&self, block: &mut Block<Self>) {
-            self.encrypt_block_inout(block.into())
-        }
+    /// Encrypt single `inout` block.
+    #[inline(always)]
+    fn encrypt_block_inout(&self, block: InOut<'_, Block<Self>>) {
+        self.callback_encrypt(|_, enc| enc(block.into_buf1()));
+    }
 
-        /// Encrypt single block block-to-block, i.e. encrypt
-        /// block from `in_block` and write result to `out_block`.
-        #[inline(always)]
-        fn encrypt_block_b2b(&self, in_block: &Block<Self>, out_block: &mut Block<Self>) {
-            self.encrypt_block_inout((in_block, out_block).into())
-        }
-    */
+    /// Encrypt single block in-place.
+    #[inline(always)]
+    fn encrypt_block(&self, block: &mut Block<Self>) {
+        self.encrypt_block_inout(block.into())
+    }
+
+    /// Encrypt single block block-to-block, i.e. encrypt
+    /// block from `in_block` and write result to `out_block`.
+    #[inline(always)]
+    fn encrypt_block_b2b(&self, in_block: &Block<Self>, out_block: &mut Block<Self>) {
+        self.encrypt_block_inout((in_block, out_block).into())
+    }
+
     /// Encrypt `inout` blocks.
     #[inline(always)]
     fn encrypt_blocks_inout(&self, mut blocks: InOutBuf<'_, Block<Self>>) {
@@ -83,26 +83,26 @@ pub trait BlockDecrypt: BlockSizeUser + Sized {
         &self,
         f: impl FnOnce(&mut [Block<Self>], &dyn Fn(InOutBuf<'_, Block<Self>>)),
     );
-    /*
-        /// Decrypt single `inout` block.
-        #[inline(always)]
-        fn decrypt_block_inout(&self, block: InOut<'_, Block<Self>>) {
-            self.callback_decrypt(|_, dec, _| dec(block));
-        }
 
-        /// Decrypt single block in-place.
-        #[inline(always)]
-        fn decrypt_block(&self, block: &mut Block<Self>) {
-            self.decrypt_block_inout(block.into())
-        }
+    /// Decrypt single `inout` block.
+    #[inline(always)]
+    fn decrypt_block_inout(&self, block: InOut<'_, Block<Self>>) {
+        self.callback_decrypt(|_, dec| dec(block.into_buf1()));
+    }
 
-        /// Decrypt single block block-to-block, i.e. decrypt
-        /// block from `in_block` and write result to `out_block`.
-        #[inline(always)]
-        fn decrypt_block_b2b(&self, in_block: &Block<Self>, out_block: &mut Block<Self>) {
-            self.decrypt_block_inout((in_block, out_block).into())
-        }
-    */
+    /// Decrypt single block in-place.
+    #[inline(always)]
+    fn decrypt_block(&self, block: &mut Block<Self>) {
+        self.decrypt_block_inout(block.into())
+    }
+
+    /// Decrypt single block block-to-block, i.e. decrypt
+    /// block from `in_block` and write result to `out_block`.
+    #[inline(always)]
+    fn decrypt_block_b2b(&self, in_block: &Block<Self>, out_block: &mut Block<Self>) {
+        self.decrypt_block_inout((in_block, out_block).into())
+    }
+
     /// Decrypt `inout` blocks.
     #[inline(always)]
     fn decrypt_blocks_inout(&self, mut blocks: InOutBuf<'_, Block<Self>>) {
@@ -149,26 +149,26 @@ pub trait BlockEncryptMut: BlockSizeUser + Sized {
         &mut self,
         f: impl FnOnce(&mut [Block<Self>], &mut dyn FnMut(InOutBuf<'_, Block<Self>>)),
     );
-    /*
-        /// Encrypt single `inout` block.
-        #[inline(always)]
-        fn encrypt_block_inout_mut(&mut self, block: InOut<'_, Block<Self>>) {
-            self.callback_encrypt_mut(|_, enc, _| enc(block));
-        }
 
-        /// Encrypt single block in-place.
-        #[inline(always)]
-        fn encrypt_block_mut(&mut self, block: &mut Block<Self>) {
-            self.encrypt_block_inout_mut(block.into())
-        }
+    /// Encrypt single `inout` block.
+    #[inline(always)]
+    fn encrypt_block_inout_mut(&mut self, block: InOut<'_, Block<Self>>) {
+        self.callback_encrypt_mut(|_, enc| enc(block.into_buf1()));
+    }
 
-        /// Encrypt single block block-to-block, i.e. encrypt
-        /// block from `in_block` and write result to `out_block`.
-        #[inline(always)]
-        fn encrypt_block_b2b_mut(&mut self, in_block: &Block<Self>, out_block: &mut Block<Self>) {
-            self.encrypt_block_inout_mut((in_block, out_block).into())
-        }
-    */
+    /// Encrypt single block in-place.
+    #[inline(always)]
+    fn encrypt_block_mut(&mut self, block: &mut Block<Self>) {
+        self.encrypt_block_inout_mut(block.into())
+    }
+
+    /// Encrypt single block block-to-block, i.e. encrypt
+    /// block from `in_block` and write result to `out_block`.
+    #[inline(always)]
+    fn encrypt_block_b2b_mut(&mut self, in_block: &Block<Self>, out_block: &mut Block<Self>) {
+        self.encrypt_block_inout_mut((in_block, out_block).into())
+    }
+
     /// Encrypt `inout` blocks.
     #[inline(always)]
     fn encrypt_blocks_inout_mut(&mut self, mut blocks: InOutBuf<'_, Block<Self>>) {
@@ -215,26 +215,26 @@ pub trait BlockDecryptMut: BlockSizeUser + Sized {
         &mut self,
         f: impl FnOnce(&mut [Block<Self>], &mut dyn FnMut(InOutBuf<'_, Block<Self>>)),
     );
-    /*
-        /// Decrypt single `inout` block.
-        #[inline(always)]
-        fn decrypt_block_inout_mut(&mut self, block: InOut<'_, Block<Self>>) {
-            self.callback_decrypt_mut(|_, dec, _| dec(block));
-        }
 
-        /// Decrypt single block in-place.
-        #[inline(always)]
-        fn decrypt_block_mut(&mut self, block: &mut Block<Self>) {
-            self.decrypt_block_inout_mut(block.into())
-        }
+    /// Decrypt single `inout` block.
+    #[inline(always)]
+    fn decrypt_block_inout_mut(&mut self, block: InOut<'_, Block<Self>>) {
+        self.callback_decrypt_mut(|_, dec| dec(block.into_buf1()));
+    }
 
-        /// Decrypt single block block-to-block, i.e. decrypt
-        /// block from `in_block` and write result to `out_block`.
-        #[inline(always)]
-        fn decrypt_block_b2b_mut(&mut self, in_block: &Block<Self>, out_block: &mut Block<Self>) {
-            self.decrypt_block_inout_mut((in_block, out_block).into())
-        }
-    */
+    /// Decrypt single block in-place.
+    #[inline(always)]
+    fn decrypt_block_mut(&mut self, block: &mut Block<Self>) {
+        self.decrypt_block_inout_mut(block.into())
+    }
+
+    /// Decrypt single block block-to-block, i.e. decrypt
+    /// block from `in_block` and write result to `out_block`.
+    #[inline(always)]
+    fn decrypt_block_b2b_mut(&mut self, in_block: &Block<Self>, out_block: &mut Block<Self>) {
+        self.decrypt_block_inout_mut((in_block, out_block).into())
+    }
+
     /// Decrypt `inout` blocks.
     #[inline(always)]
     fn decrypt_blocks_inout_mut(&mut self, mut blocks: InOutBuf<'_, Block<Self>>) {

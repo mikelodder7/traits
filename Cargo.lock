@@ -183,7 +183,7 @@ dependencies = [
 [[package]]
 name = "inout"
 version = "0.1.0"
-source = "git+https://github.com/RustCrypto/utils?branch=add_inout#940c894bc8f457b5a8c6f3463159be8201fa332f"
+source = "git+https://github.com/RustCrypto/utils?branch=add_inout#15e7e891ab941e84fb148932fbaa7d0c66683028"
 dependencies = [
  "generic-array",
 ]
