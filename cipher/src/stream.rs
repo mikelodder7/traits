@@ -6,28 +6,29 @@
 use crate::errors::{OverflowError, StreamCipherError};
 use crate::stream_core::Counter;
 use crate::{Block, BlockDecryptMut, BlockEncryptMut};
+use core::slice;
 use inout::{InOutBuf, NotEqualError};
 
 /// Marker trait for block-level asynchronous stream ciphers
 pub trait AsyncStreamCipher: BlockEncryptMut + BlockDecryptMut + Sized {
     /// Encrypt data using `InOutBuf`.
     fn encrypt_inout(mut self, data: InOutBuf<'_, u8>) {
-        self.callback_encrypt_mut(|tmp, enc, par_enc| {
+        self.callback_encrypt_mut(|tmp, enc| {
             let (mut blocks, mut tail) = data.into_chunks();
             let chunk_len = tmp.len();
-            while blocks.len() >= chunk_len {
-                let (chunk, tail) = blocks.split_at(chunk_len);
-                blocks = tail;
-                par_enc(chunk);
+            if chunk_len > 1 {
+                while blocks.len() >= chunk_len {
+                    let (chunk, tail) = blocks.split_at(chunk_len);
+                    blocks = tail;
+                    enc(chunk);
+                }
             }
-            for block in blocks {
-                enc(block);
-            }
+            enc(blocks);
             let n = tail.len();
             if n != 0 {
                 let mut block = Block::<Self>::default();
                 block[..n].copy_from_slice(tail.reborrow().get_in());
-                enc((&mut block).into());
+                enc(slice::from_mut(&mut block).into());
                 tail.get_out().copy_from_slice(&block[..n]);
             }
         });
@@ -35,22 +36,23 @@ pub trait AsyncStreamCipher: BlockEncryptMut + BlockDecryptMut + Sized {
 
     /// Decrypt data using `InOutBuf`.
     fn decrypt_inout(mut self, data: InOutBuf<'_, u8>) {
-        self.callback_decrypt_mut(|tmp, dec, par_dec| {
+        self.callback_decrypt_mut(|tmp, dec| {
             let (mut blocks, mut tail) = data.into_chunks();
             let chunk_len = tmp.len();
-            while blocks.len() >= chunk_len {
-                let (chunk, tail) = blocks.split_at(chunk_len);
-                blocks = tail;
-                par_dec(chunk);
+            if chunk_len > 1 {
+                while blocks.len() >= chunk_len {
+                    let (chunk, tail) = blocks.split_at(chunk_len);
+                    blocks = tail;
+                    dec(chunk);
+                }
             }
-            for block in blocks {
-                dec(block);
-            }
+            dec(blocks);
+
             let n = tail.len();
             if n != 0 {
                 let mut block = Block::<Self>::default();
                 block[..n].copy_from_slice(tail.reborrow().get_in());
-                dec((&mut block).into());
+                dec(slice::from_mut(&mut block).into());
                 tail.get_out().copy_from_slice(&block[..n]);
             }
         });

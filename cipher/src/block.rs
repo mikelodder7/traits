@@ -10,7 +10,7 @@
 //! [2]: https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation
 //! [3]: https://en.wikipedia.org/wiki/Symmetric-key_algorithm
 use crypto_common::{Block, BlockSizeUser};
-use inout::{InOut, InOutBuf, NotEqualError};
+use inout::{InOutBuf, NotEqualError};
 
 /// Marker trait for block ciphers.
 pub trait BlockCipher: BlockSizeUser {}
@@ -19,47 +19,41 @@ pub trait BlockCipher: BlockSizeUser {}
 pub trait BlockEncrypt: BlockSizeUser + Sized {
     fn callback_encrypt(
         &self,
-        f: impl FnOnce(
-            &mut [Block<Self>],
-            &dyn Fn(InOut<'_, Block<Self>>),
-            &dyn Fn(InOutBuf<'_, Block<Self>>),
-        ),
+        f: impl FnOnce(&mut [Block<Self>], &dyn Fn(InOutBuf<'_, Block<Self>>)),
     );
+    /*
+        /// Encrypt single `inout` block.
+        #[inline(always)]
+        fn encrypt_block_inout(&self, block: InOut<'_, Block<Self>>) {
+            self.callback_encrypt(|_, enc| enc(block));
+        }
 
-    /// Encrypt single `inout` block.
-    #[inline(always)]
-    fn encrypt_block_inout(&self, block: InOut<'_, Block<Self>>) {
-        self.callback_encrypt(|_, enc, _| enc(block));
-    }
+        /// Encrypt single block in-place.
+        #[inline(always)]
+        fn encrypt_block(&self, block: &mut Block<Self>) {
+            self.encrypt_block_inout(block.into())
+        }
 
-    /// Encrypt single block in-place.
-    #[inline(always)]
-    fn encrypt_block(&self, block: &mut Block<Self>) {
-        self.encrypt_block_inout(block.into())
-    }
-
-    /// Encrypt single block block-to-block, i.e. encrypt
-    /// block from `in_block` and write result to `out_block`.
-    #[inline(always)]
-    fn encrypt_block_b2b(&self, in_block: &Block<Self>, out_block: &mut Block<Self>) {
-        self.encrypt_block_inout((in_block, out_block).into())
-    }
-
+        /// Encrypt single block block-to-block, i.e. encrypt
+        /// block from `in_block` and write result to `out_block`.
+        #[inline(always)]
+        fn encrypt_block_b2b(&self, in_block: &Block<Self>, out_block: &mut Block<Self>) {
+            self.encrypt_block_inout((in_block, out_block).into())
+        }
+    */
     /// Encrypt `inout` blocks.
     #[inline(always)]
     fn encrypt_blocks_inout(&self, mut blocks: InOutBuf<'_, Block<Self>>) {
-        self.callback_encrypt(|tmp, enc, par_enc| {
-            if tmp.len() > 1 {
-                let chunk_len = tmp.len();
+        self.callback_encrypt(|tmp, enc| {
+            let chunk_len = tmp.len();
+            if chunk_len > 1 {
                 while blocks.len() >= chunk_len {
                     let (chunk, tail) = blocks.split_at(chunk_len);
                     blocks = tail;
-                    par_enc(chunk);
+                    enc(chunk);
                 }
             }
-            for block in blocks {
-                enc(block);
-            }
+            enc(blocks);
         });
     }
 
@@ -87,47 +81,41 @@ pub trait BlockEncrypt: BlockSizeUser + Sized {
 pub trait BlockDecrypt: BlockSizeUser + Sized {
     fn callback_decrypt(
         &self,
-        f: impl FnOnce(
-            &mut [Block<Self>],
-            &dyn Fn(InOut<'_, Block<Self>>),
-            &dyn Fn(InOutBuf<'_, Block<Self>>),
-        ),
+        f: impl FnOnce(&mut [Block<Self>], &dyn Fn(InOutBuf<'_, Block<Self>>)),
     );
+    /*
+        /// Decrypt single `inout` block.
+        #[inline(always)]
+        fn decrypt_block_inout(&self, block: InOut<'_, Block<Self>>) {
+            self.callback_decrypt(|_, dec, _| dec(block));
+        }
 
-    /// Decrypt single `inout` block.
-    #[inline(always)]
-    fn decrypt_block_inout(&self, block: InOut<'_, Block<Self>>) {
-        self.callback_decrypt(|_, dec, _| dec(block));
-    }
+        /// Decrypt single block in-place.
+        #[inline(always)]
+        fn decrypt_block(&self, block: &mut Block<Self>) {
+            self.decrypt_block_inout(block.into())
+        }
 
-    /// Decrypt single block in-place.
-    #[inline(always)]
-    fn decrypt_block(&self, block: &mut Block<Self>) {
-        self.decrypt_block_inout(block.into())
-    }
-
-    /// Decrypt single block block-to-block, i.e. decrypt
-    /// block from `in_block` and write result to `out_block`.
-    #[inline(always)]
-    fn decrypt_block_b2b(&self, in_block: &Block<Self>, out_block: &mut Block<Self>) {
-        self.decrypt_block_inout((in_block, out_block).into())
-    }
-
+        /// Decrypt single block block-to-block, i.e. decrypt
+        /// block from `in_block` and write result to `out_block`.
+        #[inline(always)]
+        fn decrypt_block_b2b(&self, in_block: &Block<Self>, out_block: &mut Block<Self>) {
+            self.decrypt_block_inout((in_block, out_block).into())
+        }
+    */
     /// Decrypt `inout` blocks.
     #[inline(always)]
     fn decrypt_blocks_inout(&self, mut blocks: InOutBuf<'_, Block<Self>>) {
-        self.callback_decrypt(|tmp, dec, par_dec| {
-            if tmp.len() > 1 {
-                let chunk_len = tmp.len();
+        self.callback_decrypt(|tmp, dec| {
+            let chunk_len = tmp.len();
+            if chunk_len > 1 {
                 while blocks.len() >= chunk_len {
                     let (chunk, tail) = blocks.split_at(chunk_len);
                     blocks = tail;
-                    par_dec(chunk);
+                    dec(chunk);
                 }
             }
-            for block in blocks {
-                dec(block);
-            }
+            dec(blocks);
         });
     }
 
@@ -159,47 +147,41 @@ pub trait BlockDecrypt: BlockSizeUser + Sized {
 pub trait BlockEncryptMut: BlockSizeUser + Sized {
     fn callback_encrypt_mut(
         &mut self,
-        f: impl FnOnce(
-            &mut [Block<Self>],
-            &mut dyn FnMut(InOut<'_, Block<Self>>),
-            &mut dyn FnMut(InOutBuf<'_, Block<Self>>),
-        ),
+        f: impl FnOnce(&mut [Block<Self>], &mut dyn FnMut(InOutBuf<'_, Block<Self>>)),
     );
+    /*
+        /// Encrypt single `inout` block.
+        #[inline(always)]
+        fn encrypt_block_inout_mut(&mut self, block: InOut<'_, Block<Self>>) {
+            self.callback_encrypt_mut(|_, enc, _| enc(block));
+        }
 
-    /// Encrypt single `inout` block.
-    #[inline(always)]
-    fn encrypt_block_inout_mut(&mut self, block: InOut<'_, Block<Self>>) {
-        self.callback_encrypt_mut(|_, enc, _| enc(block));
-    }
+        /// Encrypt single block in-place.
+        #[inline(always)]
+        fn encrypt_block_mut(&mut self, block: &mut Block<Self>) {
+            self.encrypt_block_inout_mut(block.into())
+        }
 
-    /// Encrypt single block in-place.
-    #[inline(always)]
-    fn encrypt_block_mut(&mut self, block: &mut Block<Self>) {
-        self.encrypt_block_inout_mut(block.into())
-    }
-
-    /// Encrypt single block block-to-block, i.e. encrypt
-    /// block from `in_block` and write result to `out_block`.
-    #[inline(always)]
-    fn encrypt_block_b2b_mut(&mut self, in_block: &Block<Self>, out_block: &mut Block<Self>) {
-        self.encrypt_block_inout_mut((in_block, out_block).into())
-    }
-
+        /// Encrypt single block block-to-block, i.e. encrypt
+        /// block from `in_block` and write result to `out_block`.
+        #[inline(always)]
+        fn encrypt_block_b2b_mut(&mut self, in_block: &Block<Self>, out_block: &mut Block<Self>) {
+            self.encrypt_block_inout_mut((in_block, out_block).into())
+        }
+    */
     /// Encrypt `inout` blocks.
     #[inline(always)]
     fn encrypt_blocks_inout_mut(&mut self, mut blocks: InOutBuf<'_, Block<Self>>) {
-        self.callback_encrypt_mut(|tmp, enc, par_enc| {
-            if tmp.len() > 1 {
-                let chunk_len = tmp.len();
+        self.callback_encrypt_mut(|tmp, enc| {
+            let chunk_len = tmp.len();
+            if chunk_len > 1 {
                 while blocks.len() >= chunk_len {
                     let (chunk, tail) = blocks.split_at(chunk_len);
                     blocks = tail;
-                    par_enc(chunk);
+                    enc(chunk);
                 }
             }
-            for block in blocks {
-                enc(block);
-            }
+            enc(blocks);
         });
     }
 
@@ -231,47 +213,41 @@ pub trait BlockEncryptMut: BlockSizeUser + Sized {
 pub trait BlockDecryptMut: BlockSizeUser + Sized {
     fn callback_decrypt_mut(
         &mut self,
-        f: impl FnOnce(
-            &mut [Block<Self>],
-            &mut dyn FnMut(InOut<'_, Block<Self>>),
-            &mut dyn FnMut(InOutBuf<'_, Block<Self>>),
-        ),
+        f: impl FnOnce(&mut [Block<Self>], &mut dyn FnMut(InOutBuf<'_, Block<Self>>)),
     );
+    /*
+        /// Decrypt single `inout` block.
+        #[inline(always)]
+        fn decrypt_block_inout_mut(&mut self, block: InOut<'_, Block<Self>>) {
+            self.callback_decrypt_mut(|_, dec, _| dec(block));
+        }
 
-    /// Decrypt single `inout` block.
-    #[inline(always)]
-    fn decrypt_block_inout_mut(&mut self, block: InOut<'_, Block<Self>>) {
-        self.callback_decrypt_mut(|_, dec, _| dec(block));
-    }
+        /// Decrypt single block in-place.
+        #[inline(always)]
+        fn decrypt_block_mut(&mut self, block: &mut Block<Self>) {
+            self.decrypt_block_inout_mut(block.into())
+        }
 
-    /// Decrypt single block in-place.
-    #[inline(always)]
-    fn decrypt_block_mut(&mut self, block: &mut Block<Self>) {
-        self.decrypt_block_inout_mut(block.into())
-    }
-
-    /// Decrypt single block block-to-block, i.e. decrypt
-    /// block from `in_block` and write result to `out_block`.
-    #[inline(always)]
-    fn decrypt_block_b2b_mut(&mut self, in_block: &Block<Self>, out_block: &mut Block<Self>) {
-        self.decrypt_block_inout_mut((in_block, out_block).into())
-    }
-
+        /// Decrypt single block block-to-block, i.e. decrypt
+        /// block from `in_block` and write result to `out_block`.
+        #[inline(always)]
+        fn decrypt_block_b2b_mut(&mut self, in_block: &Block<Self>, out_block: &mut Block<Self>) {
+            self.decrypt_block_inout_mut((in_block, out_block).into())
+        }
+    */
     /// Decrypt `inout` blocks.
     #[inline(always)]
     fn decrypt_blocks_inout_mut(&mut self, mut blocks: InOutBuf<'_, Block<Self>>) {
-        self.callback_decrypt_mut(|tmp, dec, par_dec| {
-            if tmp.len() > 1 {
-                let chunk_len = tmp.len();
+        self.callback_decrypt_mut(|tmp, dec| {
+            let chunk_len = tmp.len();
+            if chunk_len > 1 {
                 while blocks.len() >= chunk_len {
                     let (chunk, tail) = blocks.split_at(chunk_len);
                     blocks = tail;
-                    par_dec(chunk);
+                    dec(chunk);
                 }
             }
-            for block in blocks {
-                dec(block);
-            }
+            dec(blocks);
         });
     }
 
@@ -299,13 +275,9 @@ impl<Alg: BlockEncrypt> BlockEncryptMut for Alg {
     #[inline(always)]
     fn callback_encrypt_mut(
         &mut self,
-        f: impl FnOnce(
-            &mut [Block<Self>],
-            &mut dyn FnMut(InOut<'_, Block<Self>>),
-            &mut dyn FnMut(InOutBuf<'_, Block<Self>>),
-        ),
+        f: impl FnOnce(&mut [Block<Self>], &mut dyn FnMut(InOutBuf<'_, Block<Self>>)),
     ) {
-        Alg::callback_encrypt(self, |b, mut enc, mut par_enc| f(b, &mut enc, &mut par_enc))
+        Alg::callback_encrypt(self, |b, mut enc| f(b, &mut enc))
     }
 }
 
@@ -313,13 +285,9 @@ impl<Alg: BlockDecrypt> BlockDecryptMut for Alg {
     #[inline(always)]
     fn callback_decrypt_mut(
         &mut self,
-        f: impl FnOnce(
-            &mut [Block<Self>],
-            &mut dyn FnMut(InOut<'_, Block<Self>>),
-            &mut dyn FnMut(InOutBuf<'_, Block<Self>>),
-        ),
+        f: impl FnOnce(&mut [Block<Self>], &mut dyn FnMut(InOutBuf<'_, Block<Self>>)),
     ) {
-        Alg::callback_decrypt(self, |b, mut dec, mut par_dec| f(b, &mut dec, &mut par_dec))
+        Alg::callback_decrypt(self, |b, mut dec| f(b, &mut dec))
     }
 }
 
@@ -327,11 +295,7 @@ impl<Alg: BlockEncrypt> BlockEncrypt for &Alg {
     #[inline(always)]
     fn callback_encrypt(
         &self,
-        f: impl FnOnce(
-            &mut [Block<Self>],
-            &dyn Fn(InOut<'_, Block<Self>>),
-            &dyn Fn(InOutBuf<'_, Block<Self>>),
-        ),
+        f: impl FnOnce(&mut [Block<Self>], &dyn Fn(InOutBuf<'_, Block<Self>>)),
     ) {
         Alg::callback_encrypt(self, f);
     }
@@ -341,11 +305,7 @@ impl<Alg: BlockDecrypt> BlockDecrypt for &Alg {
     #[inline(always)]
     fn callback_decrypt(
         &self,
-        f: impl FnOnce(
-            &mut [Block<Self>],
-            &dyn Fn(InOut<'_, Block<Self>>),
-            &dyn Fn(InOutBuf<'_, Block<Self>>),
-        ),
+        f: impl FnOnce(&mut [Block<Self>], &dyn Fn(InOutBuf<'_, Block<Self>>)),
     ) {
         Alg::callback_decrypt(self, f);
     }
@@ -354,39 +314,3 @@ impl<Alg: BlockDecrypt> BlockDecrypt for &Alg {
 // TODO: ideally it would be nice to implement `BlockEncryptMut`/`BlockDecryptMut`,
 // for `&mut Alg` where `Alg: BlockEncryptMut/BlockDecryptMut`, but, unfortunately,
 // it conflicts with impl for `Alg: BlockEncrypt/BlockDecrypt`.
-
-/// Helper macro for implementing [`BlockEncrypt`], [`BlockEncrypt`],
-/// [`BlockEncryptMut`], and [`BlockDecryptMut`] for algorithms which
-/// do not support parallel processing of blocks.
-#[macro_export]
-macro_rules! impl_simple_block_encdec {
-    (BlockEncrypt, $type:ty, $self:ident, $code:expr) => {
-        impl_simple_block_encdec!(BlockEncrypt, callback_encrypt, $type, $self, $code);
-    };
-    (BlockDecrypt, $type:ty, $self:ident, $code:expr) => {
-        impl_simple_block_encdec!(BlockDecrypt, callback_decrypt, $type, $self, $code);
-    };
-    (BlockEncryptMut, $type:ty, $self:ident, $code:expr) => {
-        impl_simple_block_encdec!(BlockEncryptMut, callback_encrypt_mut, $type, $self, $code);
-    };
-    (BlockDecryptMut, $type:ty, $self:ident, $code:expr) => {
-        impl_simple_block_encdec!(BlockDecryptMut, callback_decrypt_mut, $type, $self, $code);
-    };
-    ($trait_name:ident, $method_name:ident, $ty_name:ty, $self:ident, $code:expr) => {
-        impl $crate::$trait_name for $ty_name {
-            fn $method_name(
-                &self,
-                f: impl FnOnce(
-                    &mut [$crate::Block<Self>],
-                    &dyn Fn($crate::inout::InOut<'_, $crate::Block<Self>>),
-                    &dyn Fn($crate::inout::InOutBuf<'_, $crate::Block<Self>>),
-                ),
-            ) {
-                let $self = self;
-                f(&mut [Default::default(); 1], &$code, &|_| {
-                    panic!("the cipher does not support parallel block processing")
-                })
-            }
-        }
-    };
-}
