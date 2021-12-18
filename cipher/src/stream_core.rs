@@ -29,11 +29,13 @@ pub trait StreamCipherCore: BlockSizeUser + Sized {
     fn apply_keystream_blocks(&mut self, mut blocks: InOutBuf<'_, Block<Self>>) {
         self.callback_gen_keystream(|tmp, gen_block, gen_blocks| {
             let chunk_len = tmp.len();
-            while blocks.len() >= chunk_len {
-                gen_blocks(tmp);
-                let (mut chunk, tail) = blocks.split_at(chunk_len);
-                blocks = tail;
-                chunk.xor2out(tmp);
+            if chunk_len >= 1 {
+                while blocks.len() >= chunk_len {
+                    gen_blocks(tmp);
+                    let (mut chunk, tail) = blocks.split_at(chunk_len);
+                    blocks = tail;
+                    chunk.xor2out(tmp);
+                }
             }
             for mut block in blocks {
                 let mut t = Default::default();

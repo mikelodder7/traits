@@ -360,43 +360,19 @@ impl<Alg: BlockDecrypt> BlockDecrypt for &Alg {
 /// do not support parallel processing of blocks.
 #[macro_export]
 macro_rules! impl_simple_block_encdec {
-    (BlockEncrypt, $ty_name:ty, $self:ident, $code:expr) => {
-        impl_simple_block_encdec!(
-            BlockEncrypt,
-            callback_encrypt,
-            $ty_name,
-            $self,
-            $code,
-        );
+    (BlockEncrypt, $type:ty, $self:ident, $code:expr) => {
+        impl_simple_block_encdec!(BlockEncrypt, callback_encrypt, $type, $self, $code);
     };
-    (BlockDecrypt, $ty_name:ty, $self:ident, $code:expr) => {
-        impl_simple_block_encdec!(
-            BlockDecrypt,
-            callback_decrypt,
-            $ty_name,
-            $self,
-            $code,
-        );
+    (BlockDecrypt, $type:ty, $self:ident, $code:expr) => {
+        impl_simple_block_encdec!(BlockDecrypt, callback_decrypt, $type, $self, $code);
     };
-    (BlockEncryptMut, $ty_name:ty, $self:ident, $code:expr) => {
-        impl_simple_block_encdec!(
-            BlockEncryptMut,
-            callback_encrypt_mut,
-            $ty_name,
-            $self,
-            $code,
-        );
+    (BlockEncryptMut, $type:ty, $self:ident, $code:expr) => {
+        impl_simple_block_encdec!(BlockEncryptMut, callback_encrypt_mut, $type, $self, $code);
     };
-    (BlockDecryptMut, $ty_name:ty, $self:ident, $code:expr) => {
-        impl_simple_block_encdec!(
-            BlockDecryptMut,
-            callback_decrypt_mut,
-            $ty_name,
-            $self,
-            $code,
-        );
+    (BlockDecryptMut, $type:ty, $self:ident, $code:expr) => {
+        impl_simple_block_encdec!(BlockDecryptMut, callback_decrypt_mut, $type, $self, $code);
     };
-    ($trait_name:ident, $method_name:ident, $ty_name:ty, $self:ident, $code:expr,) => {
+    ($trait_name:ident, $method_name:ident, $ty_name:ty, $self:ident, $code:expr) => {
         impl $crate::$trait_name for $ty_name {
             fn $method_name(
                 &self,
@@ -407,11 +383,9 @@ macro_rules! impl_simple_block_encdec {
                 ),
             ) {
                 let $self = self;
-                f(
-                    &mut [Default::default(); 1],
-                    &$code,
-                    &|_| panic!("the cipher does not support parallel block processing"),
-                )
+                f(&mut [Default::default(); 1], &$code, &|_| {
+                    panic!("the cipher does not support parallel block processing")
+                })
             }
         }
     };
