@@ -346,3 +346,29 @@ impl<Alg: BlockDecrypt> BlockDecrypt for &Alg {
 // TODO: ideally it would be nice to implement `BlockEncryptMut`/`BlockDecryptMut`,
 // for `&mut Alg` where `Alg: BlockEncryptMut/BlockDecryptMut`, but, unfortunately,
 // it conflicts with impl for `Alg: BlockEncrypt/BlockDecrypt`.
+
+/// Helper macro for implementing [`BlockEncrypt`], [`BlockEncrypt`],
+/// [`BlockEncryptMut`], and [`BlockDecryptMut`] for algorithms which
+/// do not support parallel processing of blocks.
+#[macro_export]
+macro_rules! impl_simple_block_encdec {
+    ($trait_name:ident, $method_name:ident, $ty_name:ty, $self:ident, $code:expr) => {
+        impl $trait_name for $ty_name {
+            fn $method_name(
+                &self,
+                f: impl FnOnce(
+                    &mut [Block<Self>],
+                    &dyn Fn(InOut<'_, Block<Self>>),
+                    &dyn Fn(InOutBuf<'_, Block<Self>>),
+                ),
+            ) {
+                let $self = self;
+                f(
+                    &mut [Default::default(); 1],
+                    &$code,
+                    &|_| panic!("the cipher does not support parallel block processing"),
+                )
+            }
+        }
+    };
+}
